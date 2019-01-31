@@ -70,7 +70,7 @@ int main(void)
 	int fd;
 	int payload_size;
 	int payload_idx;
-	int received_payload_len;
+	int received_payload_len = 0;
 	bool first = true;
 
 	bsd_init();
@@ -95,34 +95,39 @@ int main(void)
 
 	while (len == sizeof(http_resp_buf)) {
 		len = httpc_recv(fd, http_resp_buf, sizeof(http_resp_buf));
+		if (!len) {
+			LOG_ERR("httpc_recv() failed, err %d", errno);
+			return -1;
+		}
 		if (first) {
 			payload_size = get_content_length(http_resp_buf);
 			if (payload_size < 0) {
 				LOG_ERR("Could not find 'Content Length'");
 				return -1;
 			}
+
 			payload_idx = get_payload_idx(http_resp_buf);
 			if (payload_idx < 0) {
 				LOG_ERR("Could not find payload index");
 				return -1;
 			}
-			for(u32_t i = payload_idx; i < len; ++i) {
+
+			received_payload_len = len - payload_idx;
+			LOG_DBG("Recevied payload first packet: %d", received_payload_len);
+			for(u32_t i = 0; i < received_payload_len; ++i) {
+				printk("%c", http_resp_buf[i+payload_idx]);
+			}
+			printk("First packet done\n");
+			first = false;
+		} else {
+			printk("Start second\n");
+			received_payload_len += len;
+			for(u32_t i = 0; i < len; ++i) {
 				printk("%c", http_resp_buf[i]);
 			}
-
-			first = false;
-		}
-		if (!len) {
-			LOG_ERR("httpc_recv() failed, err %d", errno);
-			return -1;
-		}
-
-		LOG_DBG("httpc_recv(), received %d bytes from 0x%x", len, fd);
-		for(u32_t i = 0; i < len; ++i) {
-			printk("%c", http_resp_buf[i]);
 		}
 	}
-	LOG_DBG("Expected pl len %d, got: %d", received_payload_len, len);
+	LOG_DBG("Expected pl %d, got: %d", received_payload_len, payload_size);
 
 	return 0;
 }
