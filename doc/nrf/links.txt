@@ -32,7 +32,7 @@
 .. |link_mcuboot| replace:: MCUboot
 .. _link_mcuboot: https://mcuboot.com
 
-.. _`nrf9160_pca10090_partition_conf.dts`: https://github.com/NordicPlayground/_fw-nrfconnect-zephyr/blob/nrf91/boards/arm/nrf9160_pca10090/nrf9160_pca10090_partition_conf.dts
+.. _`nrf9160_pca10090_partition_conf.dts`: https://github.com/NordicPlayground/fw-nrfconnect-zephyr/blob/master/boards/arm/nrf9160_pca10090/nrf9160_pca10090_partition_conf.dts
 
 .. _`J-Link Software and Documentation Pack`: https://www.segger.com/downloads/jlink
 
@@ -71,3 +71,9 @@
 .. _`nRF9160 Certifications`: https://www.nordicsemi.com/Products/Low-power-Cellular-IoT/nRF9160-Certifications
 
 .. _`nRF5 Command Line Tools`: https://www.nordicsemi.com/Software-and-Tools/Development-Tools/nRF5-Command-Line-Tools
+
+.. _`HID usage tables`: https://www.usb.org/hid
+
+.. _`HID Service Specification`: https://www.bluetooth.org/docman/handlers/downloaddoc.ashx?doc_id=245140
+
+.. _`nRF Connect for Desktop`: https://www.nordicsemi.com/Software-and-Tools/Development-Tools/nRF-Connect-for-desktop

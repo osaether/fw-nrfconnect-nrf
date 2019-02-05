@@ -68,7 +68,7 @@ Building and running
 
 This sample can be found under :file:`samples/nrf9160/asset_tracker` in the |NCS| folder structure.
 
-The sample is built as a non-secure firmware image, thus with ``CONFIG_TRUSTED_EXECUTION_NONSECURE=y`` set in ``prj.conf``.
+The sample is built as a non-secure firmware image for the nrf9160_pca10090ns board.
 It can be programmed independently from the secure boot firmware.
 
 See :ref:`gs_programming` for information about how to build and program the application.
@@ -144,9 +144,9 @@ Dependencies
 This sample uses the following |NCS| libraries and drivers:
 
     * :ref:`lib_nrf_cloud`
-    * ``lib/gps_sim``
+    * ``drivers/gps_sim``
     * ``lib/bsd_lib``
-    * ``lib/sensor_sim``
+    * ``drivers/sensor/sensor_sim``
     * :ref:`dk_buttons_and_leds_readme`
     * ``drivers/lte_link_control``
 
