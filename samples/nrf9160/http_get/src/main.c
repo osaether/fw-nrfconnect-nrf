@@ -11,6 +11,10 @@ LOG_MODULE_REGISTER(main);
 #define FLASH_OFFSET		0x56000
 #define FLASH_PAGE_SIZE   	4096
 
+static K_THREAD_STACK_DEFINE(http_thread_stack, 1024);
+
+static struct k_thread http_thread;
+
 /**< The server that hosts the firmwares. */
 const char *host = "188.166.45.240";
 
@@ -23,7 +27,7 @@ static char http_req_buf[1024] = {
 const static char * CL = "Content-Length: ";
 
 
-int get_content_length(char * rsp)
+static int get_content_length(char * rsp)
 {
 	u32_t len = 0;
 	u32_t accumulator = 1;
@@ -54,7 +58,7 @@ int get_content_length(char * rsp)
 	return len;
 }
 
-int get_payload_idx(char * rsp)
+static int get_payload_idx(char * rsp)
 {
 	char * start = rsp;
 	while(strncmp(rsp++, "\r\n\r\n", 4)) {
@@ -67,8 +71,7 @@ int get_payload_idx(char * rsp)
 	return rsp-start + 3;
 }
 
-
-int main(void)
+static void http_worker_thread(void *p1, void *p2, void *p3)
 {
 	int len;
 	int fd;
@@ -84,13 +87,13 @@ int main(void)
 
 	if (!flash_dev) {
 		LOG_ERR("Nordic nRF5 flash driver was not found!\n");
-		return -1;
+		return;
 	}
 
 	fd = httpc_connect(host, NULL, AF_INET, IPPROTO_TCP);
 	if (fd < 0) {
 		LOG_ERR("httpc_connect() failed, err %d", errno);
-		return -1;
+		return;
 	}
 
 	/* Get first load of packet, extract payload size */
@@ -98,7 +101,7 @@ int main(void)
 
 	if (flash_erase(flash_dev, FLASH_OFFSET, FLASH_PAGE_SIZE) != 0) {
 		LOG_ERR("Flash erase page at %0X failed!\n", (unsigned)FLASH_OFFSET);
-		return -1;
+		return;
 	}
 
 	/* Sleep before starting to process downloaded data,
@@ -113,21 +116,21 @@ int main(void)
 	u32_t offset = FLASH_OFFSET;
 	while (len == sizeof(http_resp_buf)) {
 		len = httpc_recv(fd, http_resp_buf, sizeof(http_resp_buf));
-		if (!len) {
+		if (len == -1) {
 			LOG_ERR("httpc_recv() failed, err %d", errno);
-			return -1;
+			return;
 		}
 		if (first) {
 			payload_size = get_content_length(http_resp_buf);
 			if (payload_size < 0) {
 				LOG_ERR("Could not find 'Content Length'");
-				return -1;
+				return;
 			}
 
 			payload_idx = get_payload_idx(http_resp_buf);
 			if (payload_idx < 0) {
 				LOG_ERR("Could not find payload index");
-				return -1;
+				return;
 			}
 
 			received_payload_len = len - payload_idx;
@@ -139,7 +142,7 @@ int main(void)
 			first = false;
 			if (flash_write(flash_dev, offset, &http_resp_buf[payload_idx], received_payload_len) != 0) {
 				LOG_ERR("Flash write failed!\n");
-				return -1;
+				return;
 			}
 			offset += received_payload_len;
 		} else {
@@ -150,13 +153,19 @@ int main(void)
 			}
 			if (flash_write(flash_dev, offset, http_resp_buf, len) != 0) {
 				LOG_ERR("Flash write failed!\n");
-				return -1;
+				return;
 			}
 			offset += len;
 		}
 	}
 	flash_write_protection_set(flash_dev, true);
 	LOG_DBG("Expected pl %d, got: %d", received_payload_len, payload_size);
+}
 
-	return 0;
+
+void main(void)
+{
+	k_thread_create(&http_thread, http_thread_stack,
+			K_THREAD_STACK_SIZEOF(http_thread_stack), http_worker_thread,
+			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 }
