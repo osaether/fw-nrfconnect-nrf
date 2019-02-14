@@ -26,7 +26,7 @@ void httpc_disconnect(int fd);
 
 int httpc_request(int fd, char *req, u32_t len);
 
-int httpc_recv(int fd, char *buf, u32_t len);
+int httpc_recv(int fd, char *buf, u32_t len, int flags);
 
 #ifdef __cplusplus
 }

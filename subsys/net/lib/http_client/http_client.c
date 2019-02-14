@@ -76,7 +76,7 @@ int httpc_request(int fd, char *req, u32_t len)
 	return send(fd, req, len, 0);
 }
 
-int httpc_recv(int fd, char *buf, u32_t len)
+int httpc_recv(int fd, char *buf, u32_t len, int flags)
 {
-	return recv(fd, buf, len, 0);
+	return recv(fd, buf, len, flags);
 }
