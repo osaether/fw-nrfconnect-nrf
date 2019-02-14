@@ -47,8 +47,18 @@ static void http_worker_thread(void *p1, void *p2, void *p3)
 		return;
 	}
 	len_tot = 0;
+	struct get_file_param file_param = {
+		.host = host,
+		.port = NULL,
+		.filename = filename,
+		.req_buf = http_req_buf,
+		.req_buf_len = sizeof(http_req_buf),
+		.resp_buf = http_resp_buf,
+		.resp_buf_len = sizeof(http_resp_buf),
+		.callback = flash_write_callback
+	};
 	flash_write_protection_set(flash_dev, false);
-	http_get_file(host, NULL, filename, http_req_buf, sizeof(http_req_buf), http_resp_buf, sizeof(http_resp_buf), flash_write_callback);
+	http_get_file(&file_param);
 	flash_write_protection_set(flash_dev, true);
 
 	LOG_DBG("Received %d bytes\n", len_tot);

@@ -42,77 +42,61 @@ static int get_content_length(char * rsp)
 	return len;
 }
 
-static int get_payload_idx(char * rsp)
+int http_get_file(struct get_file_param *param)
 {
-	char * start = rsp;
-	while(strncmp(rsp++, "\r\n\r\n", 4)) {
-		if (rsp - start > 500) {
-			return -1;
-		}
-	}
-
-	LOG_DBG("Payload index: %d", rsp-start);
-	return rsp-start + 3;
-}
-
-int http_get_file(const char *const host, const char *const port, const char *filename, char *req_buf, size_t req_buf_len, char *resp_buf, size_t resp_buf_len, void (*callback)(char *, int))
-{
-    int len;
+    int len = 0;
 	int fd;
     int payload_size = 0;
 	int payload_idx;
 	int received_payload_len = 0;
-	bool first = true;
+	bool header_received = false;
 
 	bsd_init();
 
-    snprintf(req_buf, req_buf_len, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", filename, host);
+    snprintf(param->req_buf, param->req_buf_len, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", param->filename, param->host);
 
-	fd = httpc_connect(host, NULL, family, proto);
+	fd = httpc_connect(param->host, NULL, family, proto);
 	if (fd < 0) {
 		LOG_ERR("httpc_connect() failed, err %d", errno);
 		return -1;
 	}
 
 	/* Get first load of packet, extract payload size */
-	(void) httpc_request(fd, req_buf, strlen(req_buf));
+	(void) httpc_request(fd, param->req_buf, strlen(param->req_buf));
 
-	/* Sleep before starting to process downloaded data,
-	 * otherwise the program will hang (no log output).
-	 * TODO: figure why this is necessary.
-	 */
-	// k_sleep(K_SECONDS(1));
-
-	len = resp_buf_len;
-
-	while (len == resp_buf_len) {
-		len = httpc_recv(fd, resp_buf, resp_buf_len);
+	while(!header_received)
+	{
+		len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, MSG_PEEK);
 		if (len == -1) {
+			if (errno == EAGAIN)
+			{
+				continue;
+			}
 			LOG_ERR("httpc_recv() failed, err %d", errno);
 			return -1;
 		}
-		if (first) {
-            payload_size = get_content_length(resp_buf);
-			if (payload_size < 0) {
-				LOG_ERR("Could not find 'Content Length'");
-				return -1;
+		char *pstr = strstr(param->resp_buf, "\r\n\r\n");
+		if (pstr != NULL) {
+			payload_idx = pstr - param->resp_buf;
+			if (payload_idx > 0) {
+				payload_idx += 4;
+				len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, 0);
+				header_received = true;
 			}
-			payload_idx = get_payload_idx(resp_buf);
-			if (payload_idx < 0) {
-				LOG_ERR("Could not find payload index");
-				return -1;
-			}
-
-			received_payload_len = len - payload_idx;
-			LOG_DBG("Recevied payload first packet: %d", received_payload_len);
-			printk("First packet done\n");
-			first = false;
-            callback(&resp_buf[payload_idx], received_payload_len);
-		} else {
-			printk("Start next\n");
-			received_payload_len += len;
-            callback(resp_buf, len);
 		}
+	}
+	payload_size = get_content_length(param->resp_buf);
+	if (payload_size < 0) {
+		LOG_ERR("Could not find 'Content Length'");
+		return -1;
+	}
+
+	received_payload_len = len - payload_idx;
+	while (received_payload_len > 0) {
+		
+        param->callback(&param->resp_buf[payload_idx], received_payload_len);
+		payload_idx = 0;
+		received_payload_len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, 0);
 	}
     return payload_size;
 }
