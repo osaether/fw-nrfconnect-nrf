@@ -28,7 +28,7 @@ static void flash_write_callback(char *buf, int len)
 	int err;
 
 	// Erase page(s) here:
-    
+
 	err = flash_write(flash_dev, addr, buf, len);
 	if (err != 0) {
 		LOG_ERR("Flash write error %d at address %08x\n", err, addr);

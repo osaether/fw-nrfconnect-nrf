@@ -44,16 +44,16 @@ static int get_content_length(char * rsp)
 
 int http_get_file(struct get_file_param *param)
 {
-    int len = 0;
+	int len = 0;
 	int fd;
-    int payload_size = 0;
+	int payload_size = 0;
 	int payload_idx;
 	int received_payload_len = 0;
 	bool header_received = false;
 
 	bsd_init();
 
-    snprintf(param->req_buf, param->req_buf_len, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", param->filename, param->host);
+	snprintf(param->req_buf, param->req_buf_len, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", param->filename, param->host);
 
 	fd = httpc_connect(param->host, NULL, family, proto);
 	if (fd < 0) {
@@ -93,10 +93,9 @@ int http_get_file(struct get_file_param *param)
 
 	received_payload_len = len - payload_idx;
 	while (received_payload_len > 0) {
-		
-        param->callback(&param->resp_buf[payload_idx], received_payload_len);
+		param->callback(&param->resp_buf[payload_idx], received_payload_len);
 		payload_idx = 0;
 		received_payload_len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, 0);
 	}
-    return payload_size;
+	return payload_size;
 }
