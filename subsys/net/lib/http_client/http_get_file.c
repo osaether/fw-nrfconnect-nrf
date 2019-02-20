@@ -5,6 +5,7 @@
 #include <net/socket.h>
 #include <zephyr/types.h>
 #include <stdio.h>
+#include <strings.h>
 
 LOG_MODULE_REGISTER(http_get_file);
 
@@ -18,7 +19,7 @@ static int get_content_length(char * rsp)
 	char * start = rsp;
 
 	LOG_DBG("Looking for content len");
-	while(strncmp(rsp++, "Content-Length: ", 16) != 0) {
+	while(strncasecmp(rsp++, "Content-Length: ", 16) != 0) {
 		if (rsp - start > 500) {
 			return -1;
 		}
@@ -42,14 +43,51 @@ static int get_content_length(char * rsp)
 	return len;
 }
 
+static unsigned get_chunk_size(char *rsp)
+{
+	char *plen = rsp;
+	unsigned len = 0;
+
+	LOG_DBG("Getting chunk size");
+	while(*plen == '\r' || *plen == '\n')
+		plen++;
+	while(*plen != '\r' && *plen != '\n')
+	{
+		char c = *plen;
+		len <<= 4;
+		if (c <= 'F' && c >= 'A')
+			len += c-'A'+10;
+		else if (*plen <= '9')
+			len += c-'0';
+		else
+			len += c-'a'+10;
+		plen++;
+	}
+	return len;
+}
+
+int read_chunk(int fd, char *buf, size_t buf_len, int read_len, void (*callback)(char *, int))
+{
+	int recv_len = 0;
+	int reqv_len;
+	while (1) {
+		reqv_len = (buf_len < (read_len - recv_len))? buf_len:(read_len - recv_len);
+		if (reqv_len == 0)
+			break;
+		int len = httpc_recv(fd, buf, reqv_len, 0);
+		callback(buf, len);
+		recv_len += len;
+	}
+	return recv_len;
+}
+
 int http_get_file(struct get_file_param *param)
 {
 	int len = 0;
 	int fd;
-	int payload_size = 0;
+	int tot_len = 0;
+	unsigned payload_size = 0;
 	int payload_idx;
-	int received_payload_len = 0;
-	bool header_received = false;
 
 	bsd_init();
 
@@ -64,7 +102,7 @@ int http_get_file(struct get_file_param *param)
 	/* Get first load of packet, extract payload size */
 	(void) httpc_request(fd, param->req_buf, strlen(param->req_buf));
 
-	while(!header_received)
+	while(1)
 	{
 		len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, MSG_PEEK);
 		if (len == -1) {
@@ -80,22 +118,44 @@ int http_get_file(struct get_file_param *param)
 			payload_idx = pstr - param->resp_buf;
 			if (payload_idx > 0) {
 				payload_idx += 4;
-				len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, 0);
-				header_received = true;
+				break;
 			}
 		}
 	}
 	payload_size = get_content_length(param->resp_buf);
-	if (payload_size < 0) {
-		LOG_ERR("Could not find 'Content Length'");
-		return -1;
+	if (payload_size == -1)
+	{
+	// Assuming Transfer-Encoding: chunked when Content Length not found
+		// Remove header except "\r\n":
+		httpc_recv(fd, param->resp_buf, payload_idx-2, 0);
+		while(1)
+		{
+			memset(param->resp_buf, 0, 20);
+			// Read chunk size			
+			httpc_recv(fd, param->resp_buf, 20, MSG_PEEK);
+			payload_size = get_chunk_size(param->resp_buf);
+			if (payload_size == 0)
+				break;
+			char *pstr = strstr(&param->resp_buf[2], "\r\n");
+			if (pstr == NULL)
+			{
+				LOG_ERR("Unrecognized response");
+				return -1;	
+			}
+			payload_idx = pstr - param->resp_buf;
+			if (payload_idx > 0)
+				payload_idx += 2;
+			// Remove chunk size:
+			len = httpc_recv(fd, param->resp_buf, payload_idx, 0);
+			// Read chunk:
+			tot_len += read_chunk(fd, param->resp_buf, param->resp_buf_len, payload_size, param->callback);
+		}
+	} else {
+		// Found Content-Length, Read everything in one go
+		// Remove header:
+		httpc_recv(fd, param->resp_buf, payload_idx, 0);
+		// Read chunk:
+		tot_len += read_chunk(fd, param->resp_buf, param->resp_buf_len, payload_size, param->callback);
 	}
-
-	received_payload_len = len - payload_idx;
-	while (received_payload_len > 0) {
-		param->callback(&param->resp_buf[payload_idx], received_payload_len);
-		payload_idx = 0;
-		received_payload_len = httpc_recv(fd, param->resp_buf, param->resp_buf_len, 0);
-	}
-	return payload_size;
+	return tot_len;
 }
