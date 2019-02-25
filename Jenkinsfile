@@ -1,8 +1,6 @@
 // Due to JENKINS-42369 we put these defines outside the pipeline
 def IMAGE_TAG = "ncs-toolchain:1.07"
 def REPO_CI_TOOLS = "https://github.com/zephyrproject-rtos/ci-tools.git"
-def REPO_ZEPHYR = "https://github.com/NordicPlayground/fw-nrfconnect-zephyr.git"
-def REPO_NRFXLIB = "https://github.com/NordicPlayground/nrfxlib.git"
 
 // Function to get the current repo URL, to be propagated to the downstream job
 def getRepoURL() {
@@ -29,6 +27,7 @@ pipeline {
     docker {
       image "$IMAGE_TAG"
       label "docker && ncs"
+      args '-e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/workdir/.local/bin'
     }
   }
   options {
@@ -44,7 +43,7 @@ pipeline {
       COMPLIANCE_REPORT_ARGS = "-p $CHANGE_ID -S $GIT_COMMIT -g"
 
       // Build all custom samples that match the ci_build tag
-      SANITYCHECK_OPTIONS = "--board-root $WORKSPACE/nrf/boards --testcase-root $WORKSPACE/nrf/samples --build-only --disable-unrecognized-section-test -t ci_build --inline-logs"
+      SANITYCHECK_OPTIONS = "--board-root $WORKSPACE/nrf/boards --testcase-root $WORKSPACE/nrf/samples --testcase-root $WORKSPACE/nrf/applications --build-only --disable-unrecognized-section-test -t ci_build --inline-logs"
       ARCH = "-a arm"
       LC_ALL = "C.UTF-8"
 
@@ -59,15 +58,16 @@ pipeline {
   stages {
     stage('Checkout repositories') {
       steps {
+        // Fetch the tools used to checking compliance
         dir("ci-tools") {
           git branch: "master", url: "$REPO_CI_TOOLS"
         }
-        dir("zephyr") {
-          git branch: "master", url: "$REPO_ZEPHYR", credentialsId: 'github'
-        }
-        dir("nrfxlib") {
-          git branch: "master", url: "$REPO_NRFXLIB", credentialsId: 'github'
-        }
+        // Install and initialize west
+        sh "pip3 install --user west==0.5.1"
+        sh "west init -l nrf/"
+
+        // Checkout
+        sh "west update"
       }
     }
 
@@ -100,12 +100,19 @@ pipeline {
                 file_path = "zephyr/sanity-out/nrf9160_pca10090/nrf9160/${samples[i]}/test_build/zephyr/zephyr.hex"
                 check_and_store_sample("$file_path", "${samples[i]}_nrf9160_pca10090.hex")
               }
-              ns_samples = ['asset_tracker', 'lte_ble_gateway', 'at_client']
+              ns_samples = ['lte_ble_gateway', 'at_client']
               for(int i=0; i<ns_samples.size(); i++)
               {
                 file_path = "zephyr/sanity-out/nrf9160_pca10090ns/nrf9160/${ns_samples[i]}/test_build/zephyr/zephyr.hex"
                 check_and_store_sample("$file_path", "${ns_samples[i]}_nrf9160_pca10090ns.hex")
               }
+	      ns_apps = ['asset_tracker']
+              for(int i=0; i<ns_apps.size(); i++)
+              {
+                file_path = "zephyr/sanity-out/nrf9160_pca10090ns/${ns_apps[i]}/test_build/zephyr/zephyr.hex"
+                check_and_store_sample("$file_path", "${ns_apps[i]}_nrf9160_pca10090ns.hex")
+              }
+
             }
             archiveArtifacts allowEmptyArchive: true, artifacts: 'artifacts/*.hex'
           }

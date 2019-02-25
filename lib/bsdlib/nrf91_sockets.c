@@ -341,13 +341,13 @@ static int nrf91_socket_offload_socket(int family, int type, int proto)
 
 	family = z_to_nrf_family(family);
 	if (family == -EAFNOSUPPORT) {
-		errno = -EAFNOSUPPORT;
+		errno = EAFNOSUPPORT;
 		return -1;
 	}
 
 	proto = z_to_nrf_protocol(proto);
 	if (proto == -EPROTONOSUPPORT) {
-		errno = -EPROTONOSUPPORT;
+		errno = EPROTONOSUPPORT;
 		return -1;
 	}
 
@@ -389,7 +389,7 @@ static int nrf91_socket_offload_accept(int sd, struct sockaddr *addr,
 
 error:
 	retval = -1;
-	errno = -ENOTSUP;
+	errno = ENOTSUP;
 	return retval;
 }
 
@@ -418,7 +418,7 @@ static int nrf91_socket_offload_bind(int sd, const struct sockaddr *addr,
 
 error:
 	retval = -1;
-	errno = -ENOTSUP;
+	errno = ENOTSUP;
 	return retval;
 }
 
@@ -452,7 +452,7 @@ static int nrf91_socket_offload_connect(int sd, const struct sockaddr *addr,
 
 error:
 	retval = -1;
-	errno = -ENOTSUP;
+	errno = ENOTSUP;
 	return retval;
 }
 
@@ -475,7 +475,7 @@ static int nrf91_socket_offload_setsockopt(int sd, int level, int optname,
 
 error:
 	retval = -1;
-	errno = -ENOPROTOOPT;
+	errno = ENOPROTOOPT;
 	return retval;
 }
 
@@ -498,7 +498,7 @@ static int nrf91_socket_offload_getsockopt(int sd, int level, int optname,
 
 error:
 	retval = -1;
-	errno = -ENOPROTOOPT;
+	errno = ENOPROTOOPT;
 	return retval;
 }
 
@@ -519,17 +519,19 @@ static ssize_t nrf91_socket_offload_recvfrom(int sd, void *buf, short int len,
 		retval = nrf_recvfrom(sd, buf, len, z_to_nrf_flags(flags), NULL,
 				      NULL);
 	} else {
-		struct nrf_sockaddr cliaddr;
-		nrf_socklen_t sock_len = sizeof(struct nrf_sockaddr);
+		/* Allocate space for maximum of IPv4 and IPv6 family type. */
+		struct nrf_sockaddr_in6 cliaddr_storage;
+		nrf_socklen_t sock_len = sizeof(struct nrf_sockaddr_in6);
+		struct nrf_sockaddr *cliaddr = (struct nrf_sockaddr *)&cliaddr_storage;
 
 		retval = nrf_recvfrom(sd, buf, len, z_to_nrf_flags(flags),
-				      &cliaddr, &sock_len);
-		if (cliaddr.sa_family == NRF_AF_INET) {
-			nrf_to_z_ipv4(from, (struct nrf_sockaddr_in *)&cliaddr);
+				      cliaddr, &sock_len);
+		if (cliaddr->sa_family == NRF_AF_INET) {
+			nrf_to_z_ipv4(from, (struct nrf_sockaddr_in *)cliaddr);
 			*fromlen = sizeof(struct sockaddr_in);
-		} else if (cliaddr.sa_family == NRF_AF_INET6) {
+		} else if (cliaddr->sa_family == NRF_AF_INET6) {
 			nrf_to_z_ipv6(from, (struct nrf_sockaddr_in6 *)
-					  &cliaddr);
+					  cliaddr);
 			*fromlen = sizeof(struct sockaddr_in6);
 		}
 	}
@@ -573,7 +575,7 @@ static ssize_t nrf91_socket_offload_sendto(int sd, const void *buf, size_t len,
 
 error:
 	retval = -1;
-	errno = -ENOTSUP;
+	errno = ENOTSUP;
 	return retval;
 }
 
@@ -593,9 +595,6 @@ static inline int nrf91_socket_offload_poll(struct pollfd *fds, int nfds,
 		if (fds[i].events & POLLOUT) {
 			tmp[i].requested |= NRF_POLLOUT;
 		}
-		if (fds[i].events & POLLERR) {
-			tmp[i].requested |= NRF_POLLERR;
-		}
 	}
 
 	retval = nrf_poll((struct nrf_pollfd *)&tmp, nfds, timeout);
@@ -610,7 +609,7 @@ static inline int nrf91_socket_offload_poll(struct pollfd *fds, int nfds,
 		if (tmp[i].returned & NRF_POLLOUT) {
 			fds[i].revents |= POLLOUT;
 		}
-		if (tmp[i].requested & NRF_POLLERR) {
+		if (tmp[i].returned & NRF_POLLERR) {
 			fds[i].revents |= POLLERR;
 		}
 	}

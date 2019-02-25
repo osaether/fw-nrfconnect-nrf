@@ -22,7 +22,13 @@
 #include "orientation_detector.h"
 
 /* Interval in milliseconds between each time status LEDs are updated. */
-#define LEDS_UPDATE_INTERVAL	        K_MSEC(500)
+#if defined(CONFIG_BOARD_NRF9160_PCA20035)
+#define LEDS_ON_INTERVAL	        K_MSEC(1)
+#define LEDS_OFF_INTERVAL	        K_MSEC(2000)
+#else
+#define LEDS_ON_INTERVAL	        K_MSEC(500)
+#define LEDS_OFF_INTERVAL	        K_MSEC(500)
+#endif
 
 /* Interval in milliseconds between each time LEDs are updated when indicating
  * that an error has occurred.
@@ -66,20 +72,20 @@ defined(CONFIG_NRF_CLOUD_PROVISION_CERTIFICATES)
 	requires CONFIG_LTE_AUTO_INIT_AND_CONNECT to be disabled!"
 #endif
 
-enum {
-#if defined(CONFIG_BOARD_NRF9160_PCA20035)
+static enum {
+#ifdef CONFIG_BOARD_NRF9160_PCA20035
 	LEDS_INITIALIZING	= LED_ON(0),
 	LEDS_CONNECTING		= LED_BLINK(DK_LED3_MSK),
 	LEDS_PATTERN_WAIT	= LED_BLINK(DK_LED2_MSK | DK_LED3_MSK),
-	LEDS_PATTERN_ENTRY	= LED_ON(DK_LED2_MSK) | LED_BLINK(DK_LED3_MSK),
-	LEDS_PATTERN_DONE	= LED_ON(DK_LED2_MSK | DK_LED3_MSK),
-	LEDS_PAIRED		= LED_ON(DK_LED2_MSK),
+	LEDS_PATTERN_ENTRY	= LED_BLINK(DK_LED1_MSK | DK_LED2_MSK),
+	LEDS_PATTERN_DONE	= LED_BLINK(DK_LED2_MSK | DK_LED3_MSK),
+	LEDS_PAIRED		= LED_BLINK(DK_LED2_MSK),
 	LEDS_CALIBRATING	= LED_ON(DK_LED1_MSK | DK_LED3_MSK),
 	LEDS_ERROR_NRF_CLOUD	= LED_BLINK(DK_LED1_MSK),
 	LEDS_ERROR_BSD_REC	= LED_BLINK(DK_LED1_MSK | DK_LED3_MSK),
 	LEDS_ERROR_BSD_IRREC	= LED_BLINK(DK_ALL_LEDS_MSK),
 	LEDS_ERROR_LTE_LC	= LED_BLINK(DK_LED1_MSK | DK_LED2_MSK),
-	LEDS_ERROR_UNKNOWN	= LED_ON(DK_ALL_LEDS_MSK)
+	LEDS_ERROR_UNKNOWN	= LED_BLINK(DK_ALL_LEDS_MSK)
 #else
 	LEDS_INITIALIZING	= LED_ON(0),
 	LEDS_CONNECTING		= LED_BLINK(DK_LED3_MSK),
@@ -109,7 +115,10 @@ struct env_sensor {
 static const enum nrf_cloud_sensor available_sensors[] = {
 	NRF_CLOUD_SENSOR_GPS,
 	NRF_CLOUD_SENSOR_FLIP,
-	NRF_CLOUD_SENSOR_TEMP
+	NRF_CLOUD_SENSOR_BUTTON,
+	NRF_CLOUD_SENSOR_TEMP,
+	NRF_CLOUD_SENSOR_HUMID,
+	NRF_CLOUD_SENSOR_AIR_PRESS
 };
 
 static struct env_sensor temp_sensor = {
@@ -118,9 +127,23 @@ static struct env_sensor temp_sensor = {
 	.dev_name = CONFIG_TEMP_DEV_NAME
 };
 
+static struct env_sensor humid_sensor = {
+	.type = NRF_CLOUD_SENSOR_HUMID,
+	.channel = SENSOR_CHAN_HUMIDITY,
+	.dev_name = CONFIG_TEMP_DEV_NAME
+};
+
+static struct env_sensor pressure_sensor = {
+	.type = NRF_CLOUD_SENSOR_AIR_PRESS,
+	.channel = SENSOR_CHAN_PRESS,
+	.dev_name = CONFIG_TEMP_DEV_NAME
+};
+
 /* Array containg environment sensors available on the board. */
 static struct env_sensor *env_sensors[] = {
-	&temp_sensor
+	&temp_sensor,
+	&humid_sensor,
+	&pressure_sensor
 };
 
  /* Variables to keep track of nRF cloud user association. */
@@ -134,6 +157,7 @@ static struct k_sem user_assoc_sem;
 static struct gps_data nmea_data;
 static struct nrf_cloud_sensor_data flip_cloud_data;
 static struct nrf_cloud_sensor_data gps_cloud_data;
+static struct nrf_cloud_sensor_data button_cloud_data;
 static struct nrf_cloud_sensor_data env_cloud_data[ARRAY_SIZE(env_sensors)];
 static atomic_val_t send_data_enable;
 
@@ -277,6 +301,32 @@ static void sensor_trigger_handler(struct device *dev,
 	/* No action implemented. */
 }
 
+#if defined(CONFIG_DK_LIBRARY)
+/**@brief Send button presses to cloud */
+static void button_send(bool pressed)
+{
+	char data[] = "1";
+
+	if (!atomic_get(&send_data_enable)) {
+		return;
+	}
+
+	if (!pressed) {
+		data[0] = '0';
+	}
+
+	button_cloud_data.data.ptr = &data;
+	button_cloud_data.data.len = strlen(data);
+	button_cloud_data.tag += 1;
+
+	if (button_cloud_data.tag == 0) {
+		button_cloud_data.tag = 0x1;
+	}
+
+	sensor_data_send(&button_cloud_data);
+}
+#endif
+
 /**@brief Poll flip orientation and send to cloud if flip mode is enabled. */
 static void flip_send(struct k_work *work)
 {
@@ -386,7 +436,13 @@ static void leds_update(struct k_work *work)
 	}
 
 	if (work) {
-		k_delayed_work_submit(&leds_update_work, LEDS_UPDATE_INTERVAL);
+		if (led_on) {
+			k_delayed_work_submit(&leds_update_work,
+						LEDS_ON_INTERVAL);
+		} else {
+			k_delayed_work_submit(&leds_update_work,
+						LEDS_OFF_INTERVAL);
+		}
 	}
 }
 
@@ -427,6 +483,7 @@ static void on_user_association_req(const struct nrf_cloud_evt *p_evt)
 			printk("using the buttons and switches\n");
 		} else if (IS_ENABLED(CONFIG_CLOUD_UA_CONSOLE)) {
 			printk("using the console\n");
+			console_init();
 		}
 	}
 }
@@ -649,6 +706,11 @@ static void button_handler(u32_t buttons, u32_t has_changed)
 		flip_send(NULL);
 	}
 
+	if (IS_ENABLED(CONFIG_CLOUD_BUTTON) &&
+	   (has_changed & CONFIG_CLOUD_BUTTON_INPUT)) {
+		button_send(buttons & CONFIG_CLOUD_BUTTON_INPUT);
+	}
+
 	if (IS_ENABLED(CONFIG_ACCEL_USE_EXTERNAL) &&
 			(buttons & has_changed & CALIBRATION_INPUT)) {
 		if (!long_press_active) {
@@ -741,7 +803,7 @@ static void work_init(void)
 	k_delayed_work_init(&leds_update_work, leds_update);
 	k_delayed_work_init(&flip_poll_work, flip_send);
 	k_delayed_work_init(&long_press_button_work, accelerometer_calibrate);
-	k_delayed_work_submit(&leds_update_work, LEDS_UPDATE_INTERVAL);
+	k_delayed_work_submit(&leds_update_work, LEDS_ON_INTERVAL);
 }
 
 /**@brief Configures modem to provide LTE link. Blocks until link is
@@ -855,12 +917,21 @@ static void env_sensor_init(void)
 	}
 }
 
+static void button_sensor_init(void)
+{
+	button_cloud_data.type = NRF_CLOUD_SENSOR_BUTTON;
+	button_cloud_data.tag = 0x1;
+}
+
 /**@brief Initializes the sensors that are used by the application. */
 static void sensors_init(void)
 {
 	gps_init();
 	flip_detection_init();
 	env_sensor_init();
+	if (IS_ENABLED(CONFIG_CLOUD_BUTTON)) {
+		button_sensor_init();
+	}
 
 	gps_cloud_data.type = NRF_CLOUD_SENSOR_GPS;
 	gps_cloud_data.tag = 0x1;
@@ -868,6 +939,11 @@ static void sensors_init(void)
 	gps_cloud_data.data.len = nmea_data.len;
 
 	flip_cloud_data.type = NRF_CLOUD_SENSOR_FLIP;
+
+	/* Send sensor data after initialization, as it may be a long time until
+	 * next time if the application is in power optimized mode.
+	 */
+	env_data_send();
 }
 
 /**@brief Initializes buttons and LEDs, using the DK buttons and LEDs
@@ -905,13 +981,11 @@ void main(void)
 	modem_configure();
 	cloud_connect(NULL);
 
-	if (IS_ENABLED(CONFIG_CLOUD_UA_CONSOLE)) {
-		console_init();
-	}
-
 	while (true) {
 		nrf_cloud_process();
 		input_process();
 		k_sleep(K_MSEC(10));
+		/* Put CPU to idle to save power */
+		k_cpu_idle();
 	}
 }
