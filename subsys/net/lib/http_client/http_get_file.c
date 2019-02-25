@@ -125,7 +125,7 @@ int http_get_file(struct get_file_param *param)
 	payload_size = get_content_length(param->resp_buf);
 	if (payload_size == -1)
 	{
-	// Assuming Transfer-Encoding: chunked when Content Length not found
+		// Assuming Transfer-Encoding: chunked when Content Length not found
 		// Remove header except "\r\n":
 		httpc_recv(fd, param->resp_buf, payload_idx-2, 0);
 		while(1)
@@ -140,7 +140,7 @@ int http_get_file(struct get_file_param *param)
 			if (pstr == NULL)
 			{
 				LOG_ERR("Unrecognized response");
-				return -1;	
+				return -1;
 			}
 			payload_idx = pstr - param->resp_buf;
 			if (payload_idx > 0)
